@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from typing import Any, Dict, List
 
 from app.llm.registry import get_provider
+from app.storage.audit_log import AUDIT_LOGGER
+from app.storage.consent_store import CONSENT_STORE
 from app.tools.permissions import check_permission
 from app.tools.registry import get_tool, list_tools
 
@@ -72,9 +74,31 @@ def run_agent(message: str, provider_name: str) -> AgentResponse:
         arguments = build_tool_arguments(tool_name, message)
         allowed, reason = check_permission(tool_name, arguments)
         if not allowed:
-            result = {"status": "permission_required", "message": reason}
+            consent_request = CONSENT_STORE.create(tool_name, arguments)
+            AUDIT_LOGGER.append(
+                "consent_requested",
+                actor="agent",
+                details={
+                    "tool": tool_name,
+                    "consent_id": consent_request.id,
+                    "reason": reason,
+                },
+            )
+            result = {
+                "status": "permission_required",
+                "message": reason,
+                "consent_id": consent_request.id,
+            }
         else:
             result = tool.handler(arguments)
+            AUDIT_LOGGER.append(
+                "tool_executed",
+                actor="agent",
+                details={
+                    "tool": tool_name,
+                    "result": result,
+                },
+            )
         tool_calls.append(
             ToolCall(
                 name=tool.name,
