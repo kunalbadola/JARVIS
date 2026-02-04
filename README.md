@@ -75,3 +75,15 @@ Additional environment variables:
 
 Set `VOICE_ALLOW_FALLBACK=true` to allow provider fallback to mock providers when
 credentials are missing.
+
+## Client app
+
+A minimal Next.js client lives in `client/` with streaming chat, mic capture, and TTS playback.
+
+```bash
+cd client
+npm install
+NEXT_PUBLIC_CHAT_URL=http://localhost:8000/chat \
+NEXT_PUBLIC_VOICE_WS_URL=ws://localhost:8000/voice \
+npm run dev
+```
