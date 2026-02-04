@@ -9,11 +9,39 @@ type Message = {
 };
 
 type Status = 'idle' | 'listening' | 'processing' | 'playing';
+type IntegrationProvider = {
+  name: string;
+  label: string;
+  scopes: string[];
+  connected: boolean;
+};
+type ConsentRequest = {
+  id: string;
+  tool_name: string;
+  payload: Record<string, unknown>;
+  status: string;
+  created_at: string;
+  resolved_at?: string | null;
+  resolution?: string | null;
+};
+type AuditEntry = {
+  id: string;
+  event: string;
+  actor: string;
+  details: Record<string, unknown>;
+  created_at: string;
+};
+type PrivacySettings = {
+  retention_days: number;
+  data_export_enabled: boolean;
+  delete_on_request: boolean;
+};
 
 const CHAT_ENDPOINT =
   process.env.NEXT_PUBLIC_CHAT_URL ?? 'http://localhost:8000/chat';
 const VOICE_WS_ENDPOINT =
   process.env.NEXT_PUBLIC_VOICE_WS_URL ?? 'ws://localhost:8000/voice';
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 const PCM_SAMPLE_RATE = 16000;
 
 const statusCopy: Record<Status, string> = {
@@ -54,6 +82,13 @@ export default function Home() {
   const [status, setStatus] = useState<Status>('idle');
   const [input, setInput] = useState('');
   const [micActive, setMicActive] = useState(false);
+  const [integrations, setIntegrations] = useState<IntegrationProvider[]>([]);
+  const [consentRequests, setConsentRequests] = useState<ConsentRequest[]>([]);
+  const [auditLogs, setAuditLogs] = useState<AuditEntry[]>([]);
+  const [privacyPolicy, setPrivacyPolicy] = useState('');
+  const [privacySettings, setPrivacySettings] = useState<PrivacySettings | null>(null);
+  const [privacyDraft, setPrivacyDraft] = useState<PrivacySettings | null>(null);
+  const [privacySaving, setPrivacySaving] = useState(false);
 
   const streamingAbortRef = useRef<AbortController | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -64,6 +99,36 @@ export default function Home() {
   const playbackCursorRef = useRef<number>(0);
 
   const transcript = useMemo(() => messages, [messages]);
+
+  const refreshIntegrations = useCallback(async () => {
+    const response = await fetch(`${API_BASE}/integrations/providers`);
+    const data = (await response.json()) as IntegrationProvider[];
+    setIntegrations(data);
+  }, []);
+
+  const refreshConsents = useCallback(async () => {
+    const response = await fetch(`${API_BASE}/consent/requests`);
+    const data = (await response.json()) as ConsentRequest[];
+    setConsentRequests(data);
+  }, []);
+
+  const refreshAuditLogs = useCallback(async () => {
+    const response = await fetch(`${API_BASE}/audit/logs?limit=20`);
+    const data = (await response.json()) as AuditEntry[];
+    setAuditLogs(data);
+  }, []);
+
+  const loadPrivacy = useCallback(async () => {
+    const [policyResponse, settingsResponse] = await Promise.all([
+      fetch(`${API_BASE}/privacy/policy`),
+      fetch(`${API_BASE}/privacy/settings`)
+    ]);
+    const policyData = (await policyResponse.json()) as { policy: string };
+    const settingsData = (await settingsResponse.json()) as PrivacySettings;
+    setPrivacyPolicy(policyData.policy);
+    setPrivacySettings(settingsData);
+    setPrivacyDraft(settingsData);
+  }, []);
 
   const appendMessage = useCallback((role: Message['role'], content: string) => {
     setMessages((prev) => [...prev, { id: crypto.randomUUID(), role, content }]);
@@ -272,6 +337,69 @@ export default function Home() {
     };
   }, [stopMic]);
 
+  useEffect(() => {
+    refreshIntegrations().catch(console.error);
+    refreshConsents().catch(console.error);
+    refreshAuditLogs().catch(console.error);
+    loadPrivacy().catch(console.error);
+  }, [loadPrivacy, refreshAuditLogs, refreshConsents, refreshIntegrations]);
+
+  const handleConnect = useCallback(
+    async (provider: IntegrationProvider) => {
+      const response = await fetch(`${API_BASE}/integrations/oauth/start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: provider.name,
+          redirect_uri: `${window.location.origin}/oauth/callback`
+        })
+      });
+      const data = (await response.json()) as { auth_url: string };
+      window.open(data.auth_url, '_blank', 'noopener');
+      refreshIntegrations().catch(console.error);
+    },
+    [refreshIntegrations]
+  );
+
+  const handleDisconnect = useCallback(
+    async (provider: IntegrationProvider) => {
+      await fetch(`${API_BASE}/integrations/${provider.name}`, { method: 'DELETE' });
+      refreshIntegrations().catch(console.error);
+    },
+    [refreshIntegrations]
+  );
+
+  const handleResolveConsent = useCallback(
+    async (requestId: string, approved: boolean) => {
+      await fetch(`${API_BASE}/consent/requests/${requestId}/resolve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ approved })
+      });
+      refreshConsents().catch(console.error);
+      refreshAuditLogs().catch(console.error);
+    },
+    [refreshAuditLogs, refreshConsents]
+  );
+
+  const handleSavePrivacy = useCallback(async () => {
+    if (!privacyDraft) return;
+    setPrivacySaving(true);
+    try {
+      const response = await fetch(`${API_BASE}/privacy/settings`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(privacyDraft)
+      });
+      const data = (await response.json()) as PrivacySettings;
+      setPrivacySettings(data);
+      setPrivacyDraft(data);
+      refreshAuditLogs().catch(console.error);
+    } finally {
+      setPrivacySaving(false);
+    }
+  }, [privacyDraft, refreshAuditLogs]);
+
   return (
     <main>
       <header>
@@ -325,6 +453,160 @@ export default function Home() {
           <p className="footer-note">
             Uses WebSocket audio streaming to /voice and plays TTS responses.
           </p>
+        </div>
+      </section>
+
+      <section className="card" style={{ marginTop: '24px' }}>
+        <h2>Security &amp; Governance</h2>
+        <div className="grid">
+          <div>
+            <h3>Integrations (OAuth)</h3>
+            <div className="list">
+              {integrations.map((provider) => (
+                <div key={provider.name} className="list-item">
+                  <div>
+                    <strong>{provider.label}</strong>
+                    <p className="footer-note">
+                      Scopes: {provider.scopes.length ? provider.scopes.join(', ') : 'None'}
+                    </p>
+                  </div>
+                  <div className="row-actions">
+                    {provider.connected ? (
+                      <button type="button" onClick={() => handleDisconnect(provider)}>
+                        Disconnect
+                      </button>
+                    ) : (
+                      <button type="button" onClick={() => handleConnect(provider)}>
+                        Connect
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <h3>Consent Requests</h3>
+            {consentRequests.length === 0 ? (
+              <p className="footer-note">No pending consent prompts.</p>
+            ) : (
+              <div className="list">
+                {consentRequests.map((request) => (
+                  <div key={request.id} className="list-item">
+                    <div>
+                      <strong>{request.tool_name}</strong>
+                      <p className="footer-note">
+                        Status: {request.status} · Requested {request.created_at}
+                      </p>
+                    </div>
+                    {request.status === 'pending' ? (
+                      <div className="row-actions">
+                        <button type="button" onClick={() => handleResolveConsent(request.id, true)}>
+                          Approve
+                        </button>
+                        <button
+                          type="button"
+                          className="ghost"
+                          onClick={() => handleResolveConsent(request.id, false)}
+                        >
+                          Deny
+                        </button>
+                      </div>
+                    ) : (
+                      <span className="status-pill">{request.status}</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="grid" style={{ marginTop: '20px' }}>
+          <div>
+            <h3>Privacy Policy</h3>
+            <p className="policy">{privacyPolicy || 'Loading policy...'}</p>
+          </div>
+          <div>
+            <h3>Data Retention Settings</h3>
+            {privacyDraft ? (
+              <div className="form">
+                <label>
+                  Retention (days)
+                  <input
+                    type="number"
+                    min={1}
+                    max={3650}
+                    value={privacyDraft.retention_days}
+                    onChange={(event) =>
+                      setPrivacyDraft({
+                        ...privacyDraft,
+                        retention_days: Number(event.target.value)
+                      })
+                    }
+                  />
+                </label>
+                <label className="checkbox">
+                  <input
+                    type="checkbox"
+                    checked={privacyDraft.data_export_enabled}
+                    onChange={(event) =>
+                      setPrivacyDraft({
+                        ...privacyDraft,
+                        data_export_enabled: event.target.checked
+                      })
+                    }
+                  />
+                  Enable data export
+                </label>
+                <label className="checkbox">
+                  <input
+                    type="checkbox"
+                    checked={privacyDraft.delete_on_request}
+                    onChange={(event) =>
+                      setPrivacyDraft({
+                        ...privacyDraft,
+                        delete_on_request: event.target.checked
+                      })
+                    }
+                  />
+                  Delete data on request
+                </label>
+                <button type="button" onClick={handleSavePrivacy} disabled={privacySaving}>
+                  {privacySaving ? 'Saving...' : 'Save settings'}
+                </button>
+                {privacySettings && (
+                  <p className="footer-note">
+                    Current retention: {privacySettings.retention_days} days
+                  </p>
+                )}
+              </div>
+            ) : (
+              <p className="footer-note">Loading settings...</p>
+            )}
+          </div>
+        </div>
+
+        <div style={{ marginTop: '20px' }}>
+          <h3>Audit Logs</h3>
+          {auditLogs.length === 0 ? (
+            <p className="footer-note">No audit entries yet.</p>
+          ) : (
+            <div className="list">
+              {auditLogs.map((entry) => (
+                <div key={entry.id} className="list-item">
+                  <div>
+                    <strong>{entry.event}</strong>
+                    <p className="footer-note">
+                      {entry.actor} · {entry.created_at}
+                    </p>
+                  </div>
+                  <span className="status-pill">{entry.event}</span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </section>
     </main>

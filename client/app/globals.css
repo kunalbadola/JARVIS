@@ -34,6 +34,16 @@ h1 {
   font-size: 2.1rem;
 }
 
+h2 {
+  margin: 0 0 12px;
+  font-size: 1.4rem;
+}
+
+h3 {
+  margin: 0 0 12px;
+  font-size: 1.1rem;
+}
+
 p {
   margin: 0;
   color: #b5bed9;
@@ -121,6 +131,15 @@ input[type='text'] {
   color: inherit;
 }
 
+input[type='number'] {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(86, 96, 120, 0.5);
+  background: rgba(10, 12, 18, 0.7);
+  color: inherit;
+}
+
 button {
   padding: 12px 18px;
   border-radius: 12px;
@@ -134,6 +153,11 @@ button {
 
 button:hover {
   background: rgba(88, 136, 255, 0.4);
+}
+
+button.ghost {
+  border-color: rgba(120, 130, 160, 0.4);
+  background: rgba(24, 26, 34, 0.7);
 }
 
 button:disabled {
@@ -159,4 +183,73 @@ button:disabled {
   margin-top: 16px;
   font-size: 0.85rem;
   color: #92a1c6;
+}
+
+.grid {
+  display: grid;
+  gap: 20px;
+}
+
+@media (min-width: 900px) {
+  .grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.list-item {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: rgba(14, 16, 24, 0.65);
+  border: 1px solid rgba(86, 96, 120, 0.3);
+}
+
+.row-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.status-pill {
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  background: rgba(88, 136, 255, 0.2);
+  border: 1px solid rgba(88, 136, 255, 0.4);
+}
+
+.policy {
+  white-space: pre-wrap;
+  line-height: 1.5;
+  color: #b5bed9;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.form label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.9rem;
+  color: #b5bed9;
+}
+
+.checkbox {
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
 }
