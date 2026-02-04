@@ -27,13 +27,17 @@ def detect_intent(message: str) -> str:
     lowered = message.lower()
     if any(word in lowered for word in ["remember", "save", "note"]):
         return "remember"
+    if any(word in lowered for word in ["summary", "summarize"]):
+        return "store_summary"
     if any(word in lowered for word in ["task", "todo", "remind"]):
         return "create_task"
+    if any(word in lowered for word in ["recall", "search", "lookup", "find memory"]):
+        return "recall"
     return "general"
 
 
 def select_tools(intent: str) -> List[str]:
-    if intent in {"remember", "create_task"}:
+    if intent in {"remember", "create_task", "store_summary", "recall"}:
         return [intent]
     return []
 
@@ -46,7 +50,14 @@ def run_agent(message: str, provider_name: str) -> AgentResponse:
     tool_calls: List[ToolCall] = []
     for tool_name in select_tools(intent):
         tool = get_tool(tool_name)
-        arguments = {"content": message} if tool_name == "remember" else {"title": message}
+        if tool_name == "remember":
+            arguments = {"content": message}
+        elif tool_name == "store_summary":
+            arguments = {"content": message}
+        elif tool_name == "recall":
+            arguments = {"query": message}
+        else:
+            arguments = {"title": message}
         result = tool.handler(arguments)
         tool_calls.append(
             ToolCall(
