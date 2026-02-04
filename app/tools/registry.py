@@ -5,6 +5,8 @@ from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
 
 from app.storage.state import STATE
+from app.tools.adapters import CalendarAdapter, EmailAdapter, HomeAssistantAdapter, SafeCommandRunner
+from app.tools.permissions import check_permission
 
 ToolHandler = Callable[[Dict[str, Any]], Dict[str, Any]]
 
@@ -18,6 +20,10 @@ class Tool:
 
 
 TOOLS: Dict[str, Tool] = {}
+_CALENDAR_ADAPTER = CalendarAdapter()
+_EMAIL_ADAPTER = EmailAdapter()
+_HOME_ASSISTANT_ADAPTER = HomeAssistantAdapter()
+_COMMAND_RUNNER = SafeCommandRunner()
 
 
 def register_tool(tool: Tool) -> None:
@@ -87,6 +93,38 @@ def _create_task_tool(payload: Dict[str, Any]) -> Dict[str, Any]:
     status = payload.get("status", "open")
     item = STATE.add_task(title=title, status=status, metadata=payload.get("metadata"))
     return {"task_id": item.id, "title": item.title, "status": item.status}
+
+
+def _calendar_crud_tool(payload: Dict[str, Any]) -> Dict[str, Any]:
+    allowed, reason = check_permission("calendar_crud", payload)
+    if not allowed:
+        return {"status": "permission_required", "message": reason}
+    provider = payload.get("provider", "google")
+    action = payload.get("action", "list")
+    return _CALENDAR_ADAPTER.handle(provider, action, payload)
+
+
+def _email_message_tool(payload: Dict[str, Any]) -> Dict[str, Any]:
+    allowed, reason = check_permission("email_message", payload)
+    if not allowed:
+        return {"status": "permission_required", "message": reason}
+    provider = payload.get("provider", "google")
+    action = payload.get("action", "search")
+    return _EMAIL_ADAPTER.handle(provider, action, payload)
+
+
+def _smart_home_tool(payload: Dict[str, Any]) -> Dict[str, Any]:
+    allowed, reason = check_permission("smart_home_control", payload)
+    if not allowed:
+        return {"status": "permission_required", "message": reason}
+    return _HOME_ASSISTANT_ADAPTER.handle(payload)
+
+
+def _system_command_tool(payload: Dict[str, Any]) -> Dict[str, Any]:
+    allowed, reason = check_permission("system_command", payload)
+    if not allowed:
+        return {"status": "permission_required", "message": reason}
+    return _COMMAND_RUNNER.run(payload)
 
 
 register_tool(
@@ -195,5 +233,84 @@ register_tool(
             "required": ["title"],
         },
         handler=_create_task_tool,
+    )
+)
+
+register_tool(
+    Tool(
+        name="calendar_crud",
+        description="Create, read, update, or delete calendar events for Google or Outlook.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "provider": {"type": "string", "enum": ["google", "outlook"]},
+                "action": {"type": "string", "enum": ["create", "read", "update", "delete", "list"]},
+                "title": {"type": "string"},
+                "start": {"type": "string"},
+                "end": {"type": "string"},
+                "attendees": {"type": "array", "items": {"type": "string"}},
+                "location": {"type": "string"},
+                "event_id": {"type": "string"},
+                "approved": {"type": "boolean"},
+            },
+        },
+        handler=_calendar_crud_tool,
+    )
+)
+
+register_tool(
+    Tool(
+        name="email_message",
+        description="Search, compose, or send emails using Google or Outlook.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "provider": {"type": "string", "enum": ["google", "outlook"]},
+                "action": {"type": "string", "enum": ["search", "compose", "send"]},
+                "query": {"type": "string"},
+                "to": {"type": "array", "items": {"type": "string"}},
+                "subject": {"type": "string"},
+                "body": {"type": "string"},
+                "cc": {"type": "array", "items": {"type": "string"}},
+                "bcc": {"type": "array", "items": {"type": "string"}},
+                "draft_id": {"type": "string"},
+                "approved": {"type": "boolean"},
+            },
+        },
+        handler=_email_message_tool,
+    )
+)
+
+register_tool(
+    Tool(
+        name="smart_home_control",
+        description="Control Home Assistant devices and services.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "service": {"type": "string"},
+                "entity_id": {"type": "string"},
+                "device_id": {"type": "string"},
+                "data": {"type": "object"},
+                "approved": {"type": "boolean"},
+            },
+        },
+        handler=_smart_home_tool,
+    )
+)
+
+register_tool(
+    Tool(
+        name="system_command",
+        description="Run a safe, allowlisted system command.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "command": {"type": ["string", "array"], "items": {"type": "string"}},
+                "approved": {"type": "boolean"},
+            },
+            "required": ["command"],
+        },
+        handler=_system_command_tool,
     )
 )
